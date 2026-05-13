@@ -157,6 +157,12 @@ export default function App() {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
 
+          if (e.key === "Tab") {
+        e.preventDefault()
+        setViewMode((prev) => (prev === "grid" ? "filmstrip" : "grid"))
+        return
+      }
+
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && e.key === "a") {
         e.preventDefault()

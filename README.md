@@ -1,73 +1,95 @@
-# React + TypeScript + Vite
+# PhotoSieve
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+极速摄影筛片桌面工具 —— 本地 RAW+JPG 浏览、打分、对比、导出。
 
-Currently, two official plugins are available:
+> 本项目全程由 AI（Claude Code + DeepSeek-V4）对话提示词生成，无手写代码。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 技术栈
 
-## React Compiler
+- **桌面框架**：Tauri v2（Rust 后端 + React 前端）
+- **前端**：React 19 + TypeScript + TailwindCSS v4 + Zustand
+- **虚拟滚动**：@tanstack/react-virtual
+- **面板布局**：react-resizable-panels
+- **存储**：rusqlite（本地 SQLite 打分持久化）
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 功能
 
-## Expanding the ESLint configuration
+### 极速浏览
+- 大图目录快速扫描与索引
+- 网格视图 + 胶片视图双模式切换
+- 横向/纵向虚拟滚动，万张级流畅渲染
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### JPG/RAW 合并
+- 13 种 RAW 格式识别（ARW/CR2/CR3/NEF/NRW/RAF/RW2/ORF/DNG/X3F/PEF/3FR/FFF）
+- 同名 JPG 与 RAW 自动合并为单一条目
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### 单键快捷打分
+- 键盘 1-5：星级评分（☆ n）
+- 键盘 6-9：颜色标签（红/橙/黄/绿）
+- 键盘 X：待删标记（✕）
+- 键盘 U：清除所有标记
+- 右键上下文菜单：复制/粘贴标签，批量操作
+- 打分数据 300ms 防抖写入本地 SQLite，重启不丢
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### 筛选
+- 星级筛选 / 颜色筛选 / 待删筛选
+- 严格 AND 交集，未评分图片在启用筛选时被排除
+- 筛选结果只影响展示，不影响原始数据
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 连拍自动分组
+- 按拍摄时间间隔 ≤1s 自动合并连拍组
+- 网格视图展平显示每张 + 连拍角标 `1/3`
+- 胶片视图动态内切：底部缩略图条一个连拍组占一个位，键盘 ↑/↓ 在组内翻页，角标实时更新
+
+### 胶片视图专业导航
+- 可拖拽面板布局（导航器 / 大图区 / EXIF 区 / 缩略图条）
+- 高精度导航器：object-contain 精确白框，随缩放拖拽实时跟踪
+- 光标处精准缩放（Alt+滚轮 10% / 纯滚轮 1%）
+- 鼠标拖拽平移
+
+### 双图同步对比
+- 胶片视图按 Alt 点缩略图进入左右/上下对比
+- 完美像素级同步缩放与平移
+- 工具栏一键切换分割方向
+
+### EXIF 信息
+- 大图自动读取拍摄时间、相机型号、光圈、快门、ISO、焦距
+- 胶片视图右侧面板展示，可折叠
+
+### 系统回收站删除
+- 选中图片 → Delete 键或工具栏按钮 → 移入系统回收站
+- 超过 5 张弹出二次确认
+- 删除后自动清理关联数据
+
+### 本地文件导出
+- 选中图片导出到指定文件夹（复制/移动）
+- 支持选择导出 JPG / RAW
+- 系统原生文件夹选择器
+
+### 其他
+- Tab 切换网格/胶片视图
+- Ctrl+A 全选 / Ctrl+Shift+I 反选 / Ctrl/Shift 多选
+- 网格视图方向键二维空间导航，Enter 打开大图全屏查看器
+- 拖拽文件夹直接扫描
+- 工作区无缝切换：切换文件夹时自动保存上一个工作区的打分数据
+
+## 开发
+
+```bash
+# 安装依赖
+pnpm install
+
+# 开发模式
+pnpm tauri dev
+
+# 构建
+pnpm tauri build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## AI 生成说明
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+本项目所有代码包括 Rust 后端逻辑、React 前端组件、状态管理、CSS 样式、虚拟滚动优化、数学坐标计算等均由 AI（Claude Code）对话提示词逐步生成。开发过程中经由多轮提示词迭代完成功能实现与 Bug 修复。
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## License
+
+MIT
