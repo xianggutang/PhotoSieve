@@ -5,6 +5,7 @@ import { Panel, Group, Separator } from "react-resizable-panels"
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { useSelectionStore } from "../stores/selectionStore"
 import { useActiveKeyStore } from "../stores/activeKeyStore"
+import { useCompareStore } from "../stores/compareStore"
 import { type RatingInfo } from "../stores/ratingStore"
 import ContextMenu from "./ContextMenu"
 import ExifPanel from "./ExifPanel"
@@ -65,8 +66,14 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
   const [imgMeasureRef, { width: imgW, height: imgH }] = useMeasure<HTMLDivElement>()
   const imageContainerRef = useRef<HTMLDivElement | null>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const imgRef2 = useRef<HTMLImageElement | null>(null)
+  const imageContainerRef2 = useRef<HTMLDivElement | null>(null)
+  const [imgNatural2, setImgNatural2] = useState<{ w: number; h: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stripMeasureRef, { height: stripH }] = useMeasure<HTMLDivElement>()
+  const [compareBase, setCompareBase] = useState("")
+  const compareStore = useCompareStore()
+  const { isComparing, orientation: compareOrientation } = compareStore
   const [exifCache, setExifCache] = useState<Map<string, ExifData | null>>(new Map())
 
   const selectedKeys = useSelectionStore((s) => s.selectedKeys)
@@ -74,6 +81,16 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
   const activeGroup = groups[groupIndex]
   const currentGroup = activeGroup?.items[itemIndex] as ImageGroup | undefined
   const largeSrc = currentGroup?.jpg_path ? convertFileSrc(currentGroup.jpg_path) : null
+  const compareGroup = useMemo(() => {
+    if (!compareBase) return undefined
+    for (const g of groups) {
+      for (const item of g.items) {
+        if (item.base_name === compareBase) return item
+      }
+    }
+    return undefined
+  }, [compareBase, groups])
+  const compareSrc = compareGroup?.jpg_path ? convertFileSrc(compareGroup.jpg_path) : null
   const setActiveKey = useActiveKeyStore((s) => s.setKey)
 
   useEffect(() => {
@@ -190,6 +207,7 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (e.key === "Escape" && isComparing) { e.preventDefault(); compareStore.exitCompare(); return }
       if (e.key === "ArrowLeft") { e.preventDefault(); navToGroup(groupIndex - 1) }
       if (e.key === "ArrowRight") { e.preventDefault(); navToGroup(groupIndex + 1) }
       if (e.key === "ArrowUp") { e.preventDefault(); navToItem(-1) }
@@ -198,7 +216,7 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
     }
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [groupIndex, navToGroup, navToItem, resetViewport])
+  }, [groupIndex, navToGroup, navToItem, resetViewport, isComparing])
 
   const mainBox = getContainedBox(imgW, imgH, imgNatural?.w ?? 0, imgNatural?.h ?? 0)
   const navBox = getContainedBox(navW, navH, imgNatural?.w ?? 0, imgNatural?.h ?? 0)
@@ -263,6 +281,15 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
 
   const handleCardClick = useCallback(
     (e: React.MouseEvent, g: BurstGroup, gi: number) => {
+      if (e.altKey && currentGroup) {
+        e.preventDefault()
+        const clickedKey = g.items[0].base_name
+        if (clickedKey !== currentGroup.base_name) {
+          setCompareBase(clickedKey)
+          compareStore.enterCompare()
+        }
+        return
+      }
       const ctrl = e.ctrlKey || e.metaKey
       const shift = e.shiftKey
 
@@ -346,43 +373,52 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
             </Panel>
             <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
             <Panel defaultSize={70} minSize={55}>
-              <div
-                ref={(el) => {
-                  imageContainerRef.current = el
-                  if (el) imgMeasureRef(el)
-                }}
-                className={`w-full h-full flex items-center justify-center overflow-hidden relative ${panning ? "cursor-grabbing" : "cursor-grab"}`}
-                onWheel={handleImageWheel}
-                onMouseDown={handleMouseDown}
-              >
-                {largeSrc ? (
-                  <img
-                    ref={imgRef}
-                    src={largeSrc}
-                    alt={currentGroup?.base_name ?? ""}
-                    className="max-w-full max-h-full object-contain select-none"
-                    draggable={false}
-                    style={{
-                      transformOrigin: "top left",
-                      transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
-                    }}
-                    onLoad={handleImgLoad}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-3 text-neutral-500">
-                    <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                    </svg>
-                    <span>无预览（仅 RAW 文件）</span>
+              {isComparing && compareSrc ? (
+                <div className={`w-full h-full flex ${compareOrientation === "horizontal" ? "flex-row" : "flex-col"}`}>
+                  <div className="flex-1 min-h-0 min-w-0 relative">
+                    <div className={`absolute ${compareOrientation === "horizontal" ? "inset-y-0 right-0 w-0.5" : "inset-x-0 bottom-0 h-0.5"} bg-blue-500/50 z-10`} />
+                    <ImageViewer
+                      src={largeSrc}
+                      alt={currentGroup?.base_name ?? ""}
+                      imgRef={imgRef}
+                      viewport={viewport}
+                      panning={panning}
+                      onWheel={handleImageWheel}
+                      onMouseDown={handleMouseDown}
+                      onImgLoad={handleImgLoad}
+                      onMeasureRef={(el) => { imageContainerRef.current = el; if (el) imgMeasureRef(el) }}
+                      ratingKey={currentGroup?.base_name}
+                    />
                   </div>
-                )}
-                {currentGroup && <RatingOverlay baseName={currentGroup.base_name} />}
-                {viewport.scale !== 1 && (
-                  <div className="absolute top-3 right-3 bg-black/60 text-white/80 text-xs px-2 py-1 rounded pointer-events-none">
-                    {Math.round(viewport.scale * 100)}%
+                  <div className="flex-1 min-h-0 min-w-0">
+                    <ImageViewer
+                      src={compareSrc}
+                      alt={compareGroup?.base_name ?? ""}
+                      imgRef={imgRef2}
+                      viewport={viewport}
+                      panning={panning}
+                      onWheel={handleImageWheel}
+                      onMouseDown={handleMouseDown}
+                      onImgLoad={(e) => setImgNatural2({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                      onMeasureRef={(el) => { imageContainerRef2.current = el }}
+                      ratingKey={compareGroup?.base_name}
+                    />
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <ImageViewer
+                  src={largeSrc}
+                  alt={currentGroup?.base_name ?? ""}
+                  imgRef={imgRef}
+                  viewport={viewport}
+                  panning={panning}
+                  onWheel={handleImageWheel}
+                  onMouseDown={handleMouseDown}
+                  onImgLoad={handleImgLoad}
+                  onMeasureRef={(el) => { imageContainerRef.current = el; if (el) imgMeasureRef(el) }}
+                  ratingKey={currentGroup?.base_name}
+                />
+              )}
             </Panel>
             <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
             <Panel defaultSize={10} minSize={10}  collapsible={true}>
@@ -492,5 +528,58 @@ function NavBtn({ label, onClick }: { label: string; onClick: () => void }) {
     >
       {label}
     </button>
+  )
+}
+
+function ImageViewer({
+  src, alt, imgRef, viewport, panning, onWheel, onMouseDown, onImgLoad, onMeasureRef, ratingKey,
+}: {
+  src: string | null
+  alt: string
+  imgRef: React.RefObject<HTMLImageElement | null>
+  viewport: { scale: number; x: number; y: number }
+  panning: boolean
+  onWheel: (e: React.WheelEvent) => void
+  onMouseDown: (e: React.MouseEvent) => void
+  onImgLoad: (e: React.SyntheticEvent<HTMLImageElement>) => void
+  onMeasureRef: (el: HTMLDivElement | null) => void
+  ratingKey?: string
+}) {
+  return (
+    <div
+      ref={onMeasureRef}
+      className={`w-full h-full flex items-center justify-center overflow-hidden relative ${panning ? "cursor-grabbing" : "cursor-grab"}`}
+      onWheel={onWheel}
+      onMouseDown={onMouseDown}
+    >
+      {src ? (
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          className="max-w-full max-h-full object-contain select-none"
+          draggable={false}
+          style={{
+            transformOrigin: "top left",
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+            willChange: "transform",
+          }}
+          onLoad={onImgLoad}
+        />
+      ) : (
+        <div className="flex flex-col items-center gap-3 text-neutral-500">
+          <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+          </svg>
+          <span>无预览（仅 RAW 文件）</span>
+        </div>
+      )}
+      {ratingKey && <RatingOverlay baseName={ratingKey} />}
+      {viewport.scale !== 1 && (
+        <div className="absolute top-3 right-3 bg-black/60 text-white/80 text-xs px-2 py-1 rounded pointer-events-none">
+          {Math.round(viewport.scale * 100)}%
+        </div>
+      )}
+    </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useSelectionStore } from "./stores/selectionStore"
-import { useRatingStore, type RatingInfo } from "./stores/ratingStore"
+import { useRatingStore, type RatingInfo, type RatingRow } from "./stores/ratingStore"
 import { useFilterStore } from "./stores/filterStore"
 import { useActiveKeyStore } from "./stores/activeKeyStore"
 import { groupBurstPhotos, flattenBurstKeys } from "./utils/groupBurstPhotos"
@@ -18,7 +18,8 @@ import useFileDrop from "./hooks/useFileDrop"
 import type { ImageGroup } from "./types"
 
 export default function App() {
-  const [path, setPath] = useState("")
+  const [inputPath, setInputPath] = useState("")
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
   const [images, setImages] = useState<ImageGroup[]>([])
   const [loading, setLoading] = useState(false)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
@@ -41,23 +42,37 @@ export default function App() {
 
   async function doScan(targetPath: string) {
     setLoading(true)
-    setPath(targetPath)
     try {
-      const result = await invoke<ImageGroup[]>("scan_directory", { path: targetPath })
+      if (loadedPath && loadedPath !== targetPath) {
+        await useRatingStore.getState().flushPending()
+        useSelectionStore.getState().clearSelection()
+        useRatingStore.getState().resetForNewFolder()
+        setImages([])
+      }
+      await invoke("init_database", { folderPath: targetPath })
+      const [result, rows] = await Promise.all([
+        invoke<ImageGroup[]>("scan_directory", { path: targetPath }),
+        invoke<RatingRow[]>("load_all_ratings", { folderPath: targetPath }),
+      ])
+      useRatingStore.getState().loadFromDb(targetPath, rows)
       setImages(result)
+      setLoadedPath(targetPath)
+      setInputPath(targetPath)
+    } catch (e) {
+      setToast(`扫描失败: ${e}`)
     } finally {
       setLoading(false)
     }
   }
 
   async function handleScan() {
-    if (path) doScan(path)
+    if (inputPath) doScan(inputPath)
   }
 
   const handleDrop = useCallback(async (paths: string[]) => {
     const targetDir = await invoke<string>("resolve_scan_target", { paths })
     doScan(targetDir)
-  }, [])
+  }, [loadedPath])
 
   const { isDragging } = useFileDrop(handleDrop)
 
@@ -90,7 +105,7 @@ export default function App() {
     try {
       const result = await invoke<[number, string[]]>("export_images", {
         baseNames: selected,
-        sourceDir: path,
+        sourceDir: loadedPath ?? inputPath,
         destDir,
         exportJpg,
         exportRaw,
@@ -112,7 +127,7 @@ export default function App() {
       setToast(`导出失败: ${e}`)
     }
     setShowExport(false)
-  }, [path])
+  }, [loadedPath, inputPath])
 
   const triggerDelete = useCallback(() => {
     const selected = [...useSelectionStore.getState().selectedKeys]
@@ -210,8 +225,8 @@ export default function App() {
       <div className="flex gap-2 mb-3 shrink-0">
         <input
           type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
+          value={inputPath}
+          onChange={(e) => setInputPath(e.target.value)}
           placeholder="输入目录路径，或拖入图片/文件夹..."
           className="flex-1 max-w-md px-3 py-2 rounded bg-neutral-800 border border-neutral-700 text-sm"
           onKeyDown={(e) => { if (e.key === "Enter") handleScan() }}
@@ -239,7 +254,7 @@ export default function App() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <span className="text-sm">正在扫描 {path}...</span>
+          <span className="text-sm">正在扫描 {inputPath}...</span>
         </div>
       )}
 

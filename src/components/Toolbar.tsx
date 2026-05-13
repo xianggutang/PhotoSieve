@@ -2,17 +2,19 @@ import { useState, useEffect, useRef } from "react"
 import { useSelectionStore } from "../stores/selectionStore"
 import { useRatingStore, COLOR_LABELS } from "../stores/ratingStore"
 import { useFilterStore } from "../stores/filterStore"
+import { useCompareStore } from "../stores/compareStore"
 
 interface ToolbarProps {
   viewMode: "grid" | "filmstrip"
   onViewModeChange: (mode: "grid" | "filmstrip") => void
   orderedKeys: string[]
-  isComparing?: boolean
   onDelete?: () => void
   onExport?: () => void
 }
 
-export default function Toolbar({ viewMode, onViewModeChange, orderedKeys, isComparing = false, onDelete, onExport }: ToolbarProps) {
+export default function Toolbar({ viewMode, onViewModeChange, orderedKeys, onDelete, onExport }: ToolbarProps) {
+  const isComparing = useCompareStore((s) => s.isComparing)
+  const toggleOrientation = useCompareStore((s) => s.toggleOrientation)
   const selectAll = useSelectionStore((s) => s.selectAll)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const selectedKeys = useSelectionStore((s) => s.selectedKeys)
@@ -36,7 +38,7 @@ export default function Toolbar({ viewMode, onViewModeChange, orderedKeys, isCom
 
       <div className="flex items-center gap-1">
         {isComparing && (
-          <ToolbarBtn label="切换分割方向" disabled>
+          <ToolbarBtn label="切换分割方向" onClick={toggleOrientation}>
             <path d="M5 7h14M5 12h14M5 17h14" />
           </ToolbarBtn>
         )}
