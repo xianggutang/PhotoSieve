@@ -68,7 +68,7 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
   const imgRef = useRef<HTMLImageElement | null>(null)
   const imgRef2 = useRef<HTMLImageElement | null>(null)
   const imageContainerRef2 = useRef<HTMLDivElement | null>(null)
-  const [imgNatural2, setImgNatural2] = useState<{ w: number; h: number } | null>(null)
+  const [, setImgNatural2] = useState<{ w: number; h: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stripMeasureRef, { height: stripH }] = useMeasure<HTMLDivElement>()
   const [compareBase, setCompareBase] = useState("")
