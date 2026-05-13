@@ -3,23 +3,23 @@ import { create } from "zustand"
 export interface RatingInfo {
   stars: number | null
   color: number | null
-  deleteMarked: boolean
+  isRejected: boolean
 }
 
 interface RatingState {
   ratings: Record<string, RatingInfo>
   setStars: (key: string, stars: number) => void
   setColor: (key: string, color: number) => void
-  toggleDeleteMark: (key: string) => void
+  toggleRejected: (key: string) => void
   clearAllMarks: (key: string) => void
   batchSetStars: (keys: string[], stars: number) => void
   batchSetColor: (keys: string[], color: number) => void
-  batchToggleDeleteMark: (keys: string[]) => void
+  batchToggleRejected: (keys: string[]) => void
   batchClearAllMarks: (keys: string[]) => void
   getRating: (key: string) => RatingInfo
 }
 
-const emptyRating = (): RatingInfo => ({ stars: null, color: null, deleteMarked: false })
+const emptyRating = (): RatingInfo => ({ stars: null, color: null, isRejected: false })
 
 function ensure(ratings: Record<string, RatingInfo>, key: string): RatingInfo {
   return ratings[key] ?? emptyRating()
@@ -31,21 +31,29 @@ export const useRatingStore = create<RatingState>((set, get) => ({
   setStars(key: string, stars: number) {
     set((s) => {
       const cur = ensure(s.ratings, key)
-      return { ratings: { ...s.ratings, [key]: { ...cur, stars: cur.stars === stars ? null : stars } } }
+      if (cur.isRejected) return s
+      return { ratings: { ...s.ratings, [key]: { ...cur, stars: cur.stars === stars ? 0 : stars } } }
     })
   },
 
   setColor(key: string, color: number) {
     set((s) => {
       const cur = ensure(s.ratings, key)
-      return { ratings: { ...s.ratings, [key]: { ...cur, color: cur.color === color ? null : color } } }
+      if (cur.isRejected) return s
+      return { ratings: { ...s.ratings, [key]: { ...cur, color: cur.color === color ? 0 : color } } }
     })
   },
 
-  toggleDeleteMark(key: string) {
+  toggleRejected(key: string) {
     set((s) => {
       const cur = ensure(s.ratings, key)
-      return { ratings: { ...s.ratings, [key]: { ...cur, deleteMarked: !cur.deleteMarked } } }
+      const next = !cur.isRejected
+      return {
+        ratings: {
+          ...s.ratings,
+          [key]: { ...cur, isRejected: next, stars: next ? null : cur.stars, color: next ? null : cur.color },
+        },
+      }
     })
   },
 
@@ -58,7 +66,8 @@ export const useRatingStore = create<RatingState>((set, get) => ({
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
-        next[k] = { ...cur, stars: cur.stars === stars ? null : stars }
+        if (cur.isRejected) continue
+        next[k] = { ...cur, stars: cur.stars === stars ? 0 : stars }
       }
       return { ratings: next }
     })
@@ -69,18 +78,20 @@ export const useRatingStore = create<RatingState>((set, get) => ({
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
-        next[k] = { ...cur, color: cur.color === color ? null : color }
+        if (cur.isRejected) continue
+        next[k] = { ...cur, color: cur.color === color ? 0 : color }
       }
       return { ratings: next }
     })
   },
 
-  batchToggleDeleteMark(keys: string[]) {
+  batchToggleRejected(keys: string[]) {
     set((s) => {
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
-        next[k] = { ...cur, deleteMarked: !cur.deleteMarked }
+        const nr = !cur.isRejected
+        next[k] = { ...cur, isRejected: nr, stars: nr ? null : cur.stars, color: nr ? null : cur.color }
       }
       return { ratings: next }
     })

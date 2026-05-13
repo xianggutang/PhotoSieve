@@ -2,17 +2,20 @@ import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useMeasure } from "react-use"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Panel, Group, Separator } from "react-resizable-panels"
-import { convertFileSrc } from "@tauri-apps/api/core"
+import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { useSelectionStore } from "../stores/selectionStore"
+import { useActiveKeyStore } from "../stores/activeKeyStore"
 import { type RatingInfo } from "../stores/ratingStore"
 import ContextMenu from "./ContextMenu"
-import type { ImageGroup } from "../types"
+import ExifPanel from "./ExifPanel"
+import RatingOverlay from "./RatingOverlay"
+import type { ImageGroup, BurstGroup, ExifData } from "../types"
 
 const GAP = 8
 const ASPECT = 3 / 2
 
 interface FilmstripViewProps {
-  images: ImageGroup[]
+  groups: BurstGroup[]
   copiedTags: RatingInfo | null
   onCopyTags: (tags: RatingInfo) => void
 }
@@ -51,8 +54,9 @@ function zoomTo(
   return { scale: ns, x: cx - offsetX - xInImage * ns, y: cy - offsetY - yInImage * ns }
 }
 
-export default function FilmstripView({ images, copiedTags, onCopyTags }: FilmstripViewProps) {
-  const [currentIndex, setCurrentIndex] = useState(0)
+export default function FilmstripView({ groups, copiedTags, onCopyTags }: FilmstripViewProps) {
+  const [groupIndex, setGroupIndex] = useState(0)
+  const [itemIndex, setItemIndex] = useState(0)
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null)
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 })
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -63,18 +67,56 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
   const imgRef = useRef<HTMLImageElement | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stripMeasureRef, { height: stripH }] = useMeasure<HTMLDivElement>()
-  
+  const [exifCache, setExifCache] = useState<Map<string, ExifData | null>>(new Map())
 
   const selectedKeys = useSelectionStore((s) => s.selectedKeys)
-  const toggleSelect = useSelectionStore((s) => s.toggleSelect)
-  const rangeSelect = useSelectionStore((s) => s.rangeSelect)
 
-  const orderedKeys = useMemo(() => images.map((g) => g.base_name), [images])
-
-  const currentGroup = images[currentIndex]
+  const activeGroup = groups[groupIndex]
+  const currentGroup = activeGroup?.items[itemIndex] as ImageGroup | undefined
   const largeSrc = currentGroup?.jpg_path ? convertFileSrc(currentGroup.jpg_path) : null
+  const setActiveKey = useActiveKeyStore((s) => s.setKey)
 
-  const resetViewport = useCallback(() => setViewport({ scale: 1, x: 0, y: 0 }), [])
+  useEffect(() => {
+    setActiveKey(currentGroup?.base_name ?? null)
+    return () => { setActiveKey(null) }
+  }, [currentGroup?.base_name, setActiveKey])
+
+  const exifKey = currentGroup?.jpg_path ?? ""
+  const exif = exifCache.get(exifKey)
+
+  useEffect(() => {
+    if (!currentGroup?.jpg_path) return
+    const path = currentGroup.jpg_path
+    if (exifCache.has(path)) return
+    invoke<ExifData>("get_exif_data", { filePath: path })
+      .then((data) => setExifCache((prev) => new Map(prev).set(path, data)))
+      .catch(() => setExifCache((prev) => new Map(prev).set(path, null)))
+  }, [groupIndex, itemIndex])
+
+  const clampGroupIndex = useCallback(
+    (gi: number) => Math.max(0, Math.min(groups.length - 1, gi)),
+    [groups.length]
+  )
+
+  const navToGroup = useCallback(
+    (gi: number) => {
+      const ci = clampGroupIndex(gi)
+      if (ci !== groupIndex) {
+        setGroupIndex(ci)
+        setItemIndex(0)
+      }
+    },
+    [groupIndex, clampGroupIndex]
+  )
+
+  const navToItem = useCallback(
+    (di: number) => {
+      if (!activeGroup || activeGroup.type === "single") return
+      const maxIdx = activeGroup.items.length - 1
+      setItemIndex((prev) => Math.max(0, Math.min(maxIdx, prev + di)))
+    },
+    [activeGroup]
+  )
 
   const setScaleAnchored = useCallback(
     (s: number) => {
@@ -84,20 +126,22 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
     [imgW, imgH, imgNatural]
   )
 
+  const resetViewport = useCallback(() => setViewport({ scale: 1, x: 0, y: 0 }), [])
+
   useEffect(() => {
-    if (currentIndex >= images.length && images.length > 0) {
-      setCurrentIndex(images.length - 1)
+    if (groupIndex >= groups.length && groups.length > 0) {
+      setGroupIndex(groups.length - 1)
+      setItemIndex(0)
     }
-  }, [images.length, currentIndex])
+  }, [groups.length, groupIndex])
 
   useEffect(() => {
     setImgNatural(null)
     setViewport({ scale: 1, x: 0, y: 0 })
-  }, [currentIndex])
+  }, [groupIndex, itemIndex])
 
   const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget
-    setImgNatural({ w: img.naturalWidth, h: img.naturalHeight })
+    setImgNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
   }, [])
 
   const handleImageWheel = useCallback(
@@ -113,21 +157,20 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
       const nw = imgRef.current?.naturalWidth ?? imgNatural?.w ?? 0
       const nh = imgRef.current?.naturalHeight ?? imgNatural?.h ?? 0
       const box = getContainedBox(iw, ih, nw, nh)
-      const delta = e.deltaY < 0 ? 1.1 : 0.9
+      const fast = e.altKey
+      const step = fast ? 1.1 : 1.01
+      const delta = e.deltaY < 0 ? step : 1 / step
       const newScale = Math.max(0.1, Math.min(10, viewport.scale * delta))
       setViewport((prev) => zoomTo(prev, newScale, mouseX, mouseY, box.x, box.y))
     },
     [viewport.scale, imgNatural]
   )
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return
-      e.preventDefault()
-      setPanning(true)
-    },
-    []
-  )
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    setPanning(true)
+  }, [])
 
   useEffect(() => {
     if (!panning) return
@@ -147,22 +190,15 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
-      if (e.key === "ArrowLeft") {
-        e.preventDefault()
-        setCurrentIndex((prev) => (prev > 0 ? prev - 1 : prev))
-      }
-      if (e.key === "ArrowRight") {
-        e.preventDefault()
-        setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : prev))
-      }
-      if (e.key === "0") {
-        e.preventDefault()
-        resetViewport()
-      }
+      if (e.key === "ArrowLeft") { e.preventDefault(); navToGroup(groupIndex - 1) }
+      if (e.key === "ArrowRight") { e.preventDefault(); navToGroup(groupIndex + 1) }
+      if (e.key === "ArrowUp") { e.preventDefault(); navToItem(-1) }
+      if (e.key === "ArrowDown") { e.preventDefault(); navToItem(1) }
+      if (e.key === "z" || e.key === "Z") { e.preventDefault(); resetViewport() }
     }
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [images.length, resetViewport])
+  }, [groupIndex, navToGroup, navToItem, resetViewport])
 
   const mainBox = getContainedBox(imgW, imgH, imgNatural?.w ?? 0, imgNatural?.h ?? 0)
   const navBox = getContainedBox(navW, navH, imgNatural?.w ?? 0, imgNatural?.h ?? 0)
@@ -188,7 +224,7 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
 
   const virtualizer = useVirtualizer({
     horizontal: true,
-    count: images.length,
+    count: groups.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => itemW,
     measureElement: (el) => el.getBoundingClientRect().width,
@@ -196,8 +232,8 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
   })
 
   useEffect(() => {
-    virtualizer.scrollToIndex(currentIndex, { align: "center" })
-  }, [currentIndex, virtualizer])
+    virtualizer.scrollToIndex(groupIndex, { align: "center" })
+  }, [groupIndex, virtualizer])
 
   const handleStripWheel = useCallback((e: React.WheelEvent) => {
     const el = scrollRef.current
@@ -205,44 +241,80 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
     el.scrollLeft += e.deltaY
   }, [])
 
-  const handleCardClick = useCallback(
-    (e: React.MouseEvent, key: string, idx: number) => {
-      const ctrl = e.ctrlKey || e.metaKey
-      const shift = e.shiftKey
-      if (shift) {
-        rangeSelect(key, orderedKeys)
-      } else if (ctrl) {
-        toggleSelect(key)
+  const setBurstSelection = useCallback(
+    (g: BurstGroup, mode: "set" | "toggle") => {
+      const keys = g.items.map((item) => item.base_name)
+      const state = useSelectionStore.getState()
+      if (mode === "toggle") {
+        const next = new Set(state.selectedKeys)
+        const allHere = keys.every((k) => next.has(k))
+        if (allHere) {
+          for (const k of keys) next.delete(k)
+        } else {
+          for (const k of keys) next.add(k)
+        }
+        useSelectionStore.setState({ selectedKeys: next, lastClickedKey: g.key })
       } else {
-        useSelectionStore.setState({ selectedKeys: new Set([key]), lastClickedKey: key })
-        setCurrentIndex(idx)
+        useSelectionStore.setState({ selectedKeys: new Set(keys), lastClickedKey: g.key })
       }
     },
-    [orderedKeys, rangeSelect, toggleSelect]
+    []
+  )
+
+  const handleCardClick = useCallback(
+    (e: React.MouseEvent, g: BurstGroup, gi: number) => {
+      const ctrl = e.ctrlKey || e.metaKey
+      const shift = e.shiftKey
+
+      if (shift) {
+        // Range select between last clicked group and this group
+        const state = useSelectionStore.getState()
+        const lastKey = state.lastClickedKey ?? groups[0]?.key ?? ""
+        const gKeys = groups.map((bg) => bg.key)
+        const idxA = gKeys.indexOf(lastKey)
+        const idxB = gKeys.indexOf(g.key)
+        if (idxA !== -1 && idxB !== -1) {
+          const [s, end] = idxA < idxB ? [idxA, idxB] : [idxB, idxA]
+          const next = new Set<string>()
+          for (let i = s; i <= end; i++) {
+            for (const item of groups[i].items) next.add(item.base_name)
+          }
+          useSelectionStore.setState({ selectedKeys: next, lastClickedKey: g.key })
+        } else {
+          setBurstSelection(g, "set")
+        }
+      } else if (ctrl) {
+        setBurstSelection(g, "toggle")
+      } else {
+        setBurstSelection(g, "set")
+        setGroupIndex(gi)
+        setItemIndex(0)
+      }
+    },
+    [groups, setBurstSelection]
   )
 
   const handleCardContextMenu = useCallback(
-    (e: React.MouseEvent, key: string) => {
+    (e: React.MouseEvent, g: BurstGroup) => {
       e.preventDefault()
-      if (!selectedKeys.has(key)) {
-        useSelectionStore.setState({ selectedKeys: new Set([key]), lastClickedKey: key })
-      }
-      setContextMenu({ x: e.clientX, y: e.clientY, targetKey: key })
+      const anySelected = g.items.some((item) => selectedKeys.has(item.base_name))
+      if (!anySelected) setBurstSelection(g, "set")
+      setContextMenu({ x: e.clientX, y: e.clientY, targetKey: g.items[0].base_name })
     },
-    [selectedKeys]
+    [selectedKeys, setBurstSelection]
   )
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
-  if (!images.length) return null
+  if (!groups.length) return null
 
   return (
-    <div className="flex-1 w-full bg-black text-white min-h-0 relative">
-      <div className="absolute inset-0">
+    <div className="flex-1 w-full bg-black text-white min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 min-w-0">
         <Group orientation="vertical">
         <Panel defaultSize={85} minSize={70}>
           <Group orientation="horizontal">
-            <Panel defaultSize={25} minSize={30}>
+            <Panel defaultSize={20} minSize={10}>
               <div className="w-full h-full bg-neutral-950 flex flex-col gap-1 p-2 overflow-hidden min-w-0">
                 <div className="flex items-center gap-1 shrink-0 flex-wrap">
                   <NavBtn label="FIT" onClick={resetViewport} />
@@ -272,10 +344,8 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
                 </div>
               </div>
             </Panel>
-            
             <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
-            
-            <Panel defaultSize={75} >
+            <Panel defaultSize={70} minSize={55}>
               <div
                 ref={(el) => {
                   imageContainerRef.current = el
@@ -289,7 +359,7 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
                   <img
                     ref={imgRef}
                     src={largeSrc}
-                    alt={currentGroup.base_name}
+                    alt={currentGroup?.base_name ?? ""}
                     className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
                     style={{
@@ -306,12 +376,17 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
                     <span>无预览（仅 RAW 文件）</span>
                   </div>
                 )}
+                {currentGroup && <RatingOverlay baseName={currentGroup.base_name} />}
                 {viewport.scale !== 1 && (
                   <div className="absolute top-3 right-3 bg-black/60 text-white/80 text-xs px-2 py-1 rounded pointer-events-none">
                     {Math.round(viewport.scale * 100)}%
                   </div>
                 )}
               </div>
+            </Panel>
+            <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
+            <Panel defaultSize={10} minSize={10}  collapsible={true}>
+              <ExifPanel exif={exif} />
             </Panel>
           </Group>
         </Panel>
@@ -320,16 +395,23 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
           <div ref={stripMeasureRef} className="w-full h-full bg-neutral-950 border-t border-neutral-800 relative min-h-0">
             <div
               ref={scrollRef}
-              className="absolute inset-0 overflow-x-auto overflow-y-hidden pb-4"
+              className="absolute inset-0 overflow-x-auto overflow-y-hidden pb-4 scrollbar-hide"
               onWheel={handleStripWheel}
             >
               <div style={{ height: stripH, width: virtualizer.getTotalSize(), position: "relative" }}>
                 {virtualizer.getVirtualItems().map((vi) => {
-                  const g = images[vi.index]
+                  const g = groups[vi.index]
                   if (!g) return null
-                  const key = g.base_name
-                  const isCurrent = vi.index === currentIndex
-                  const isSelected = selectedKeys.has(key)
+                  const isActive = vi.index === groupIndex
+                  const isBurst = g.items.length > 1
+                  const isSelected = g.items.every((item) => selectedKeys.has(item.base_name))
+                  const cover = isActive ? currentGroup ?? g.items[0] : g.items[0]
+                  const badgeLabel = isBurst && isActive
+                    ? `${itemIndex + 1}/${g.items.length}`
+                    : isBurst
+                      ? `${g.items.length}`
+                      : undefined
+
                   return (
                     <div
                       key={vi.key}
@@ -348,16 +430,23 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
                       }}
                     >
                       <div
-                        onClick={(e) => handleCardClick(e, key, vi.index)}
-                        onContextMenu={(e) => handleCardContextMenu(e, key)}
+                        onClick={(e) => handleCardClick(e, g, vi.index)}
+                        onContextMenu={(e) => handleCardContextMenu(e, g)}
                         className={`rounded overflow-hidden cursor-pointer transition-shadow ${
-                          isCurrent ? "ring-2 ring-white" : isSelected ? "ring-2 ring-blue-500" : "hover:ring-2 hover:ring-neutral-600"
+                          isActive ? "ring-2 ring-white" : isSelected ? "ring-2 ring-blue-500" : "hover:ring-2 hover:ring-neutral-600"
                         }`}
                         style={{ width: thumbW, flexShrink: 0 }}
                       >
                         <div className="bg-neutral-900 flex items-center justify-center relative" style={{ width: thumbW, height: thumbH }}>
-                          {g.jpg_path ? (
-                            <img src={convertFileSrc(g.jpg_path)} alt={key} className="w-full h-full object-contain" loading="lazy" />
+                          {cover.jpg_path ? (
+                            <>
+                              <img src={convertFileSrc(cover.jpg_path)} alt={cover.base_name} className="w-full h-full object-contain" loading="lazy" />
+                              {badgeLabel && (
+                                <div className="absolute top-1 right-1 bg-blue-600/80 text-white text-[9px] px-1 py-0.5 rounded leading-none">
+                                  {badgeLabel}
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <span className="text-neutral-600 text-[10px]">RAW</span>
                           )}
@@ -377,7 +466,7 @@ export default function FilmstripView({ images, copiedTags, onCopyTags }: Filmst
             </div>
           </div>
         </Panel>
-      </Group>
+        </Group>
       </div>
 
       {contextMenu && (

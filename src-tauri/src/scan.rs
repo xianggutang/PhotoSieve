@@ -14,7 +14,10 @@ pub struct ImageGroup {
 }
 
 const JPG_EXTS: &[&str] = &["jpg", "jpeg"];
-const RAW_EXTS: &[&str] = &["cr2", "cr3", "nef", "arw", "dng"];
+const RAW_EXTS: &[&str] = &[
+    "arw", "cr2", "cr3", "nef", "nrw", "raf", "rw2", "orf",
+    "dng", "x3f", "pef", "3fr", "fff",
+];
 
 struct Builder {
     base_name: String,

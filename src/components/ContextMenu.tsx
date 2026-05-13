@@ -73,12 +73,12 @@ export default function ContextMenu({ x, y, targetKey, selectedKeys, copiedTags,
   const handlePaste = () => {
     if (!copiedTags) return
     const { batchSetStars, batchSetColor } = ratingStore.getState()
-    if (copiedTags.stars !== null) batchSetStars(effectiveKeys, copiedTags.stars)
-    if (copiedTags.color !== null) batchSetColor(effectiveKeys, copiedTags.color)
-    if (copiedTags.deleteMarked) {
+    if ((copiedTags.stars ?? 0) > 0) batchSetStars(effectiveKeys, copiedTags.stars!)
+    if ((copiedTags.color ?? 0) > 0) batchSetColor(effectiveKeys, copiedTags.color!)
+    if (copiedTags.isRejected) {
       for (const k of effectiveKeys) {
         const cur = ratingStore.getState().getRating(k)
-        if (!cur.deleteMarked) ratingStore.getState().toggleDeleteMark(k)
+        if (!cur.isRejected) ratingStore.getState().toggleRejected(k)
       }
     }
     onClose()
@@ -104,9 +104,9 @@ export default function ContextMenu({ x, y, targetKey, selectedKeys, copiedTags,
 
   const handleDeleteMark = () => {
     if (effectiveKeys.length > 1) {
-      ratingStore.getState().batchToggleDeleteMark(effectiveKeys)
+      ratingStore.getState().batchToggleRejected(effectiveKeys)
     } else {
-      ratingStore.getState().toggleDeleteMark(targetKey)
+      ratingStore.getState().toggleRejected(targetKey)
     }
     onClose()
   }

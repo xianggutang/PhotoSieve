@@ -1,12 +1,19 @@
 import { useState, useCallback, useMemo, useEffect } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useSelectionStore } from "./stores/selectionStore"
-import { type RatingInfo } from "./stores/ratingStore"
+import { useRatingStore, type RatingInfo } from "./stores/ratingStore"
+import { useFilterStore } from "./stores/filterStore"
+import { useActiveKeyStore } from "./stores/activeKeyStore"
+import { groupBurstPhotos, flattenBurstKeys } from "./utils/groupBurstPhotos"
+import { filterImages } from "./utils/filterImages"
 import DragOverlay from "./components/DragOverlay"
 import GridView from "./components/GridView"
 import FilmstripView from "./components/FilmstripView"
 import Toolbar from "./components/Toolbar"
 import Viewer from "./components/Viewer"
+import ConfirmDialog from "./components/ConfirmDialog"
+import ExportModal from "./components/ExportModal"
+import Toast from "./components/Toast"
 import useFileDrop from "./hooks/useFileDrop"
 import type { ImageGroup } from "./types"
 
@@ -17,8 +24,20 @@ export default function App() {
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<"grid" | "filmstrip">("grid")
   const [copiedTags, setCopiedTags] = useState<RatingInfo | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ paths: string[]; count: number } | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [showExport, setShowExport] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
 
-  const orderedKeys = useMemo(() => images.map((g) => g.base_name), [images])
+  const rawGroups = useMemo(() => groupBurstPhotos(images), [images])
+  const ratings = useRatingStore((s) => s.ratings)
+  const filters = useFilterStore()
+  const burstGroups = useMemo(
+    () => filterImages(rawGroups, filters, ratings),
+    [rawGroups, filters, ratings]
+  )
+  const selectedCount = useSelectionStore((s) => s.selectedKeys.size)
+  const allKeys = useMemo(() => flattenBurstKeys(burstGroups), [burstGroups])
 
   async function doScan(targetPath: string) {
     setLoading(true)
@@ -42,6 +61,81 @@ export default function App() {
 
   const { isDragging } = useFileDrop(handleDrop)
 
+  async function executeDelete(paths: string[]) {
+    setDeleting(true)
+    setDeleteConfirm(null)
+    try {
+      const deleted = await invoke<string[]>("move_multiple_to_trash", { paths })
+      const stems = new Set(
+        deleted.map((p) => {
+          const name = p.replace(/\\/g, "/").split("/").pop() ?? ""
+          return name.replace(/\.[^.]+$/, "")
+        })
+      )
+      for (const key of stems) {
+        useRatingStore.getState().batchClearAllMarks([key])
+      }
+      setImages((prev) => prev.filter((g) => !stems.has(g.base_name)))
+      useSelectionStore.getState().clearSelection()
+      setToast(`已将 ${deleted.length} 个文件移入回收站`)
+    } catch (e) {
+      setToast(`删除失败: ${e}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleExport = useCallback(async (destDir: string, exportJpg: boolean, exportRaw: boolean, isMove: boolean) => {
+    const selected = [...useSelectionStore.getState().selectedKeys]
+    try {
+      const result = await invoke<[number, string[]]>("export_images", {
+        baseNames: selected,
+        sourceDir: path,
+        destDir,
+        exportJpg,
+        exportRaw,
+        isMove,
+      })
+      const [count, errors] = result
+      if (errors.length > 0) {
+        setToast(`导出完成: ${count} 张成功, 错误: ${errors.join("; ")}`)
+      } else {
+        setToast(`成功导出 ${count} 个文件到目标文件夹`)
+      }
+      if (isMove) {
+        const movedKeys = new Set(selected)
+        for (const key of movedKeys) useRatingStore.getState().batchClearAllMarks([key])
+        setImages((prev) => prev.filter((g) => !movedKeys.has(g.base_name)))
+        useSelectionStore.getState().clearSelection()
+      }
+    } catch (e) {
+      setToast(`导出失败: ${e}`)
+    }
+    setShowExport(false)
+  }, [path])
+
+  const triggerDelete = useCallback(() => {
+    const selected = [...useSelectionStore.getState().selectedKeys]
+    if (selected.length === 0) return
+    const paths: string[] = []
+    for (const key of selected) {
+      const img = images.find((g) => g.base_name === key)
+      if (!img) continue
+      if (img.jpg_path) paths.push(img.jpg_path)
+      if (img.raw_path) paths.push(img.raw_path)
+      const xmp = img.jpg_path?.replace(/\.[^.]+$/, ".xmp") ?? img.raw_path?.replace(/\.[^.]+$/, ".xmp")
+      if (xmp) paths.push(xmp)
+    }
+    if (paths.length === 0) return
+    if (selected.length > 5) {
+      setDeleteConfirm({ paths, count: selected.length })
+    } else {
+      executeDelete(paths)
+    }
+  }, [images])
+
+  const isFilmstrip = viewMode === "filmstrip"
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (viewerIndex != null) return
@@ -51,16 +145,52 @@ export default function App() {
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && e.key === "a") {
         e.preventDefault()
-        useSelectionStore.getState().selectAll(orderedKeys)
+        useSelectionStore.getState().selectAll(allKeys)
+        return
       }
       if (ctrl && e.shiftKey && e.key === "I") {
         e.preventDefault()
-        useSelectionStore.getState().invertSelection(orderedKeys)
+        useSelectionStore.getState().invertSelection(allKeys)
+        return
+      }
+
+      if (e.key === "Delete") {
+        e.preventDefault()
+        triggerDelete()
+        return
+      }
+
+      const isRatingKey =
+        (e.key >= "0" && e.key <= "9") ||
+        e.key === "x" || e.key === "X" ||
+        e.key === "u" || e.key === "U"
+
+      if (!isRatingKey) return
+
+      const targetKeys = isFilmstrip
+        ? (() => { const ak = useActiveKeyStore.getState().key; return ak ? [ak] : [] })()
+        : [...useSelectionStore.getState().selectedKeys]
+
+      if (targetKeys.length === 0) return
+
+      e.preventDefault()
+      const rs = useRatingStore.getState()
+
+      if (e.key === "0") {
+        rs.batchSetStars(targetKeys, 0)
+      } else if (e.key >= "1" && e.key <= "5") {
+        rs.batchSetStars(targetKeys, Number(e.key))
+      } else if (e.key >= "6" && e.key <= "9") {
+        rs.batchSetColor(targetKeys, Number(e.key))
+      } else if (e.key === "x" || e.key === "X") {
+        rs.batchToggleRejected(targetKeys)
+      } else if (e.key === "u" || e.key === "U") {
+        rs.batchClearAllMarks(targetKeys)
       }
     }
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [viewerIndex, orderedKeys])
+  }, [viewerIndex, allKeys, isFilmstrip, triggerDelete])
 
   const openViewer = (index: number) => setViewerIndex(index)
   const closeViewer = () => setViewerIndex(null)
@@ -98,7 +228,9 @@ export default function App() {
       <Toolbar
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        orderedKeys={orderedKeys}
+        orderedKeys={allKeys}
+        onDelete={deleting ? undefined : triggerDelete}
+        onExport={selectedCount > 0 ? () => setShowExport(true) : undefined}
       />
 
       {loading && (
@@ -114,13 +246,13 @@ export default function App() {
       <div className="flex-1 flex flex-col min-h-0 mt-3">
         {viewMode === "grid" ? (
           <GridView
-            images={images}
+            groups={burstGroups}
             onOpenViewer={openViewer}
             copiedTags={copiedTags}
             onCopyTags={setCopiedTags}
           />
         ) : (
-          <FilmstripView images={images} copiedTags={copiedTags} onCopyTags={setCopiedTags} />
+          <FilmstripView groups={burstGroups} copiedTags={copiedTags} onCopyTags={setCopiedTags} />
         )}
       </div>
 
@@ -137,6 +269,24 @@ export default function App() {
           onNext={nextImage}
         />
       )}
+
+      {deleteConfirm && (
+        <ConfirmDialog
+          message={`将删除 ${deleteConfirm.count} 张照片及其关联文件（JPG/RAW/XMP），此操作使用系统回收站，可恢复。`}
+          onConfirm={() => executeDelete(deleteConfirm.paths)}
+          onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {showExport && (
+        <ExportModal
+          count={selectedCount}
+          onExport={handleExport}
+          onCancel={() => setShowExport(false)}
+        />
+      )}
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   )
 }
