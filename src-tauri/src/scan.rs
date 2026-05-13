@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::BufReader;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use serde::Serialize;
@@ -81,12 +82,14 @@ pub fn scan_directory(path: String) -> Result<Vec<ImageGroup>, String> {
 
         let metadata = entry.metadata().map_err(|e| e.to_string())?;
         let size = metadata.len();
-        let timestamp = metadata
+        let ts_exif = read_exif_timestamp(&file_path);
+        let ts_fs = metadata
             .modified()
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let timestamp = ts_exif.unwrap_or(ts_fs);
 
         let group = groups.entry(base_name.clone()).or_insert_with(|| Builder {
             base_name: base_name.clone(),
@@ -171,4 +174,32 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
 
     a.len().cmp(&b.len())
+}
+
+fn read_exif_timestamp(path: &Path) -> Option<u64> {
+    let file = fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    let field = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)?;
+    let s = field.display_value().to_string();
+    parse_exif_date(&s)
+}
+
+fn parse_exif_date(s: &str) -> Option<u64> {
+    let parts: Vec<&str> = s.split(&[':', ' '][..]).collect();
+    if parts.len() < 6 { return None; }
+    let year: i64 = parts[0].parse().ok()?;
+    let month: i64 = parts[1].parse().ok()?;
+    let day: i64 = parts[2].parse().ok()?;
+    let hour: i64 = parts[3].parse().ok()?;
+    let min: i64 = parts[4].parse().ok()?;
+    let sec: i64 = parts[5].parse().ok()?;
+    let days = if month <= 2 {
+        let y = year - 1;
+        365 * y + y / 4 - y / 100 + y / 400 + (306 * (month + 12) + 5) / 10 + (day - 1) - 719528
+    } else {
+        365 * year + year / 4 - year / 100 + year / 400 + (306 * month + 5) / 10 + (day - 1) - 719528
+    };
+    let total_secs = days as u64 * 86400 + hour as u64 * 3600 + min as u64 * 60 + sec as u64;
+    Some(total_secs)
 }

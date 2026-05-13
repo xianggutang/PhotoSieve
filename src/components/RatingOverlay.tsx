@@ -1,4 +1,4 @@
-import { useRatingStore, COLOR_LABELS, type RatingInfo } from "../stores/ratingStore"
+import { useRatingStore, COLOR_LABELS } from "../stores/ratingStore"
 
 interface RatingOverlayProps {
   baseName: string
