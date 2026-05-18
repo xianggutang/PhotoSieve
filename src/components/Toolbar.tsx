@@ -187,16 +187,8 @@ function ViewToggle({ active, onClick, label, children }: { active: boolean; onC
 
 function UndoBtn() {
   const canUndo = useUndoStore((s) => s.undoStack.length > 0)
-  const doUndo = () => {
-    const actions = useUndoStore.getState().undo()
-    if (!actions) return
-    const rs = useRatingStore.getState()
-    const ratings = { ...rs.ratings }
-    for (const a of actions) ratings[a.key] = a.prev
-    useRatingStore.setState({ ratings })
-  }
   return (
-    <ToolbarBtn label="撤销 (Ctrl+Z)" disabled={!canUndo} onClick={doUndo}>
+    <ToolbarBtn label="撤销 (Ctrl+Z)" disabled={!canUndo} onClick={() => useUndoStore.getState().applyUndo()}>
       <path d="M1 4v6h6" />
       <path d="M3.5 16A9 9 0 102 11" />
     </ToolbarBtn>
@@ -205,16 +197,8 @@ function UndoBtn() {
 
 function RedoBtn() {
   const canRedo = useUndoStore((s) => s.redoStack.length > 0)
-  const doRedo = () => {
-    const actions = useUndoStore.getState().redo()
-    if (!actions) return
-    const rs = useRatingStore.getState()
-    const ratings = { ...rs.ratings }
-    for (const a of actions) ratings[a.key] = a.next
-    useRatingStore.setState({ ratings })
-  }
   return (
-    <ToolbarBtn label="重做 (Ctrl+Shift+Z)" disabled={!canRedo} onClick={doRedo}>
+    <ToolbarBtn label="重做 (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => useUndoStore.getState().applyRedo()}>
       <path d="M23 4v6h-6" />
       <path d="M20.5 16A9 9 0 1122 11" />
     </ToolbarBtn>

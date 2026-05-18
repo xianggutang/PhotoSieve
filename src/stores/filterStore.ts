@@ -1,13 +1,15 @@
 import { create } from "zustand"
 
-interface FilterState {
+export interface FilterValues {
   stars: number[]
   colors: number[]
   rejectedOnly: boolean
+}
+
+interface FilterState extends FilterValues {
   setStars: (stars: number[]) => void
   setColors: (colors: number[]) => void
   setRejectedOnly: (v: boolean) => void
-  resetAll: () => void
 }
 
 export const useFilterStore = create<FilterState>((set) => ({
@@ -25,9 +27,5 @@ export const useFilterStore = create<FilterState>((set) => ({
 
   setRejectedOnly(v: boolean) {
     set({ rejectedOnly: v })
-  },
-
-  resetAll() {
-    set({ stars: [], colors: [], rejectedOnly: false })
   },
 }))

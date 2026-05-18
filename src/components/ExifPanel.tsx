@@ -9,7 +9,7 @@ const FIELDS: { key: keyof ExifData; label: string }[] = [
   { key: "camera_model", label: "相机型号" },
   { key: "aperture", label: "光圈" },
   { key: "shutter_speed", label: "快门" },
-  { key: "iso", label: "ISO" },
+  { key: "iso", label: "ISO速度" },
   { key: "focal_length", label: "焦距" },
 ]
 

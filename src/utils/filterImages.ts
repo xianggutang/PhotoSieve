@@ -1,17 +1,12 @@
 import type { BurstGroup } from "../types"
 import type { RatingInfo } from "../stores/ratingStore"
-
-interface FilterState {
-  stars: number[]
-  colors: number[]
-  rejectedOnly: boolean
-}
+import type { FilterValues } from "../stores/filterStore"
 
 const ZERO_RATING: RatingInfo = { stars: 0, color: 0, isRejected: false }
 
 export function filterImages(
   groups: BurstGroup[],
-  filters: FilterState,
+  filters: FilterValues,
   ratings: Record<string, RatingInfo>,
 ): BurstGroup[] {
   const noFilter = filters.stars.length === 0 && filters.colors.length === 0 && !filters.rejectedOnly

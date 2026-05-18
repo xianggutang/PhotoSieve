@@ -52,6 +52,7 @@ fn value_as_uint(value: &exif::Value, index: usize) -> Option<u32> {
     match value {
         exif::Value::Short(v) => v.get(index).map(|&n| n as u32),
         exif::Value::Long(v) => v.get(index).map(|&n| n),
+        exif::Value::Rational(v) => v.get(index).map(|r| (r.num / r.denom) as u32),
         _ => None,
     }
 }
@@ -73,8 +74,9 @@ fn read_exposure_time(exif: &exif::Exif) -> Option<String> {
 }
 
 fn read_iso(exif: &exif::Exif) -> Option<String> {
-    let field = exif.get_field(exif::Tag::ISOSpeed, exif::In::PRIMARY)?;
-    value_as_uint(&field.value, 0).map(|v| format!("ISO {}", v))
+    let field = exif.get_field(exif::Tag::ISOSpeed, exif::In::PRIMARY)
+        .or_else(|| exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY))?;
+    value_as_uint(&field.value, 0).map(|v| format!("ISO-{}", v))
 }
 
 fn read_focal_length(exif: &exif::Exif) -> Option<String> {

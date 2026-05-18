@@ -41,28 +41,6 @@ export default function App() {
   const selectedCount = useSelectionStore((s) => s.selectedKeys.size)
   const allKeys = useMemo(() => flattenBurstKeys(burstGroups), [burstGroups])
 
-  const applyUndo = useCallback(() => {
-    const actions = useUndoStore.getState().undo()
-    if (!actions) return
-    const rs = useRatingStore.getState()
-    const ratings = { ...rs.ratings }
-    for (const a of actions) {
-      ratings[a.key] = a.prev
-    }
-    useRatingStore.setState({ ratings })
-  }, [])
-
-  const applyRedo = useCallback(() => {
-    const actions = useUndoStore.getState().redo()
-    if (!actions) return
-    const rs = useRatingStore.getState()
-    const ratings = { ...rs.ratings }
-    for (const a of actions) {
-      ratings[a.key] = a.next
-    }
-    useRatingStore.setState({ ratings })
-  }, [])
-
   async function doScan(targetPath: string) {
     setLoading(true)
     try {
@@ -190,12 +168,12 @@ export default function App() {
 
       if (ctrl && e.key === "z" && !e.shiftKey) {
         e.preventDefault()
-        applyUndo()
+        useUndoStore.getState().applyUndo()
         return
       }
       if (ctrl && e.key === "Z" && e.shiftKey || ctrl && e.key === "z" && e.shiftKey) {
         e.preventDefault()
-        applyRedo()
+        useUndoStore.getState().applyRedo()
         return
       }
 

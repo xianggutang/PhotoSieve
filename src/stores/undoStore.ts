@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { RatingInfo } from "./ratingStore"
+import { useRatingStore } from "./ratingStore"
 
 export interface RatingAction {
   key: string
@@ -11,9 +12,8 @@ interface UndoState {
   undoStack: RatingAction[][]
   redoStack: RatingAction[][]
   push: (actions: RatingAction[]) => void
-  undo: () => RatingAction[] | null
-  redo: () => RatingAction[] | null
-  clear: () => void
+  applyUndo: () => void
+  applyRedo: () => void
 }
 
 export const useUndoStore = create<UndoState>((set, get) => ({
@@ -25,23 +25,27 @@ export const useUndoStore = create<UndoState>((set, get) => ({
     set((s) => ({ undoStack: [...s.undoStack.slice(-49), actions], redoStack: [] }))
   },
 
-  undo() {
-    const { undoStack, redoStack } = get()
-    if (undoStack.length === 0) return null
-    const actions = undoStack[undoStack.length - 1]
-    set({ undoStack: undoStack.slice(0, -1), redoStack: [...redoStack, actions] })
-    return actions
+  applyUndo() {
+    const state = get()
+    if (state.undoStack.length === 0) return
+    const actions = state.undoStack[state.undoStack.length - 1]
+    set({ undoStack: state.undoStack.slice(0, -1), redoStack: [...state.redoStack, actions] })
+
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) ratings[a.key] = a.prev
+    useRatingStore.setState({ ratings })
   },
 
-  redo() {
-    const { undoStack, redoStack } = get()
-    if (redoStack.length === 0) return null
-    const actions = redoStack[redoStack.length - 1]
-    set({ redoStack: redoStack.slice(0, -1), undoStack: [...undoStack, actions] })
-    return actions
-  },
+  applyRedo() {
+    const state = get()
+    if (state.redoStack.length === 0) return
+    const actions = state.redoStack[state.redoStack.length - 1]
+    set({ redoStack: state.redoStack.slice(0, -1), undoStack: [...state.undoStack, actions] })
 
-  clear() {
-    set({ undoStack: [], redoStack: [] })
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) ratings[a.key] = a.next
+    useRatingStore.setState({ ratings })
   },
 }))

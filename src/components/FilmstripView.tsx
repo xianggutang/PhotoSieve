@@ -10,6 +10,8 @@ import { type RatingInfo } from "../stores/ratingStore"
 import ContextMenu from "./ContextMenu"
 import ExifPanel from "./ExifPanel"
 import RatingOverlay from "./RatingOverlay"
+import Histogram from "./Histogram"
+import { useHistogram } from "../hooks/useHistogram"
 import type { ImageGroup, BurstGroup, ExifData } from "../types"
 
 const GAP = 8
@@ -100,6 +102,13 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
 
   const exifKey = currentGroup?.jpg_path ?? ""
   const exif = exifCache.get(exifKey)
+
+  const { data: histoData, clearCache: clearHistoCache } = useHistogram(currentGroup?.jpg_path ?? null)
+
+  useEffect(() => {
+    if (groups.length !== 0) return
+    clearHistoCache()
+  }, [groups.length, clearHistoCache])
 
   useEffect(() => {
     if (!currentGroup?.jpg_path) return
@@ -372,7 +381,7 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
               </div>
             </Panel>
             <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
-            <Panel defaultSize={70} minSize={55}>
+            <Panel defaultSize={65} minSize={55}>
               {isComparing && compareSrc ? (
                 <div className={`w-full h-full flex ${compareOrientation === "horizontal" ? "flex-row" : "flex-col"}`}>
                   <div className="flex-1 min-h-0 min-w-0 relative">
@@ -421,8 +430,14 @@ export default function FilmstripView({ groups, copiedTags, onCopyTags }: Filmst
               )}
             </Panel>
             <Separator className="w-1 bg-neutral-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
-            <Panel defaultSize={10} minSize={10}  collapsible={true}>
-              <ExifPanel exif={exif} />
+            <Panel defaultSize={15} minSize={10} collapsible={true}>
+              <div className="w-full h-full bg-neutral-950 overflow-y-auto flex flex-col">
+                <ExifPanel exif={exif} />
+                <div className="h-px bg-neutral-700/50 mx-3" />
+                <div className="px-3 py-2">
+                  <Histogram data={histoData ?? null} width={260} height={100} />
+                </div>
+              </div>
             </Panel>
           </Group>
         </Panel>

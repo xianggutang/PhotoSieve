@@ -28,7 +28,6 @@ interface RatingState {
   batchClearAllMarks: (keys: string[]) => void
   getRating: (key: string) => RatingInfo
   loadFromDb: (folderPath: string, rows: RatingRow[]) => void
-  setFolder: (folderPath: string) => void
   flushPending: () => Promise<void>
   resetForNewFolder: () => void
 }
@@ -201,10 +200,6 @@ export const useRatingStore = create<RatingState>((set, get) => ({
       }
     }
     set({ ratings, folderPath: _folderPath })
-  },
-
-  setFolder(folderPath: string) {
-    set({ folderPath })
   },
 
   async flushPending() {
