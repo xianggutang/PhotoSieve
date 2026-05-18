@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { invoke } from "@tauri-apps/api/core"
+import { useUndoStore } from "./undoStore"
 
 export interface RatingInfo {
   stars: number | null
@@ -72,7 +73,9 @@ export const useRatingStore = create<RatingState>((set, get) => ({
     set((s) => {
       const cur = ensure(s.ratings, key)
       if (cur.isRejected) return s
-      return { ratings: { ...s.ratings, [key]: { ...cur, stars: cur.stars === stars ? 0 : stars } } }
+      const nextVal = { ...cur, stars: cur.stars === stars ? 0 : stars }
+      useUndoStore.getState().push([{ key, prev: { ...cur }, next: { ...nextVal } }])
+      return { ratings: { ...s.ratings, [key]: nextVal } }
     })
     markPending(key)
     scheduleFlush(get)
@@ -82,7 +85,9 @@ export const useRatingStore = create<RatingState>((set, get) => ({
     set((s) => {
       const cur = ensure(s.ratings, key)
       if (cur.isRejected) return s
-      return { ratings: { ...s.ratings, [key]: { ...cur, color: cur.color === color ? 0 : color } } }
+      const nextVal = { ...cur, color: cur.color === color ? 0 : color }
+      useUndoStore.getState().push([{ key, prev: { ...cur }, next: { ...nextVal } }])
+      return { ratings: { ...s.ratings, [key]: nextVal } }
     })
     markPending(key)
     scheduleFlush(get)
@@ -91,75 +96,94 @@ export const useRatingStore = create<RatingState>((set, get) => ({
   toggleRejected(key: string) {
     set((s) => {
       const cur = ensure(s.ratings, key)
-      const next = !cur.isRejected
-      return {
-        ratings: {
-          ...s.ratings,
-          [key]: { ...cur, isRejected: next, stars: next ? null : cur.stars, color: next ? null : cur.color },
-        },
-      }
+      const nr = !cur.isRejected
+      const nextVal = { ...cur, isRejected: nr, stars: nr ? null : cur.stars, color: nr ? null : cur.color }
+      useUndoStore.getState().push([{ key, prev: { ...cur }, next: { ...nextVal } }])
+      return { ratings: { ...s.ratings, [key]: nextVal } }
     })
     markPending(key)
     scheduleFlush(get)
   },
 
   clearAllMarks(key: string) {
-    set((s) => ({ ratings: { ...s.ratings, [key]: emptyRating() } }))
+    set((s) => {
+      const cur = ensure(s.ratings, key)
+      const nextVal = emptyRating()
+      useUndoStore.getState().push([{ key, prev: { ...cur }, next: { ...nextVal } }])
+      return { ratings: { ...s.ratings, [key]: nextVal } }
+    })
     markPending(key)
     scheduleFlush(get)
   },
 
   batchSetStars(keys: string[], stars: number) {
+    const actions: import("./undoStore").RatingAction[] = []
     set((s) => {
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
         if (cur.isRejected) continue
-        next[k] = { ...cur, stars: cur.stars === stars ? 0 : stars }
+        const nextVal = { ...cur, stars: cur.stars === stars ? 0 : stars }
+        actions.push({ key: k, prev: { ...cur }, next: { ...nextVal } })
+        next[k] = nextVal
         markPending(k)
       }
       return { ratings: next }
     })
+    useUndoStore.getState().push(actions)
     scheduleFlush(get)
   },
 
   batchSetColor(keys: string[], color: number) {
+    const actions: import("./undoStore").RatingAction[] = []
     set((s) => {
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
         if (cur.isRejected) continue
-        next[k] = { ...cur, color: cur.color === color ? 0 : color }
+        const nextVal = { ...cur, color: cur.color === color ? 0 : color }
+        actions.push({ key: k, prev: { ...cur }, next: { ...nextVal } })
+        next[k] = nextVal
         markPending(k)
       }
       return { ratings: next }
     })
+    useUndoStore.getState().push(actions)
     scheduleFlush(get)
   },
 
   batchToggleRejected(keys: string[]) {
+    const actions: import("./undoStore").RatingAction[] = []
     set((s) => {
       const next = { ...s.ratings }
       for (const k of keys) {
         const cur = ensure(next, k)
         const nr = !cur.isRejected
-        next[k] = { ...cur, isRejected: nr, stars: nr ? null : cur.stars, color: nr ? null : cur.color }
+        const nextVal = { ...cur, isRejected: nr, stars: nr ? null : cur.stars, color: nr ? null : cur.color }
+        actions.push({ key: k, prev: { ...cur }, next: { ...nextVal } })
+        next[k] = nextVal
         markPending(k)
       }
       return { ratings: next }
     })
+    useUndoStore.getState().push(actions)
     scheduleFlush(get)
   },
 
   batchClearAllMarks(keys: string[]) {
+    const actions: import("./undoStore").RatingAction[] = []
     set((s) => {
       const next = { ...s.ratings }
       for (const k of keys) {
-        next[k] = emptyRating()
+        const cur = ensure(next, k)
+        const nextVal = emptyRating()
+        actions.push({ key: k, prev: { ...cur }, next: { ...nextVal } })
+        next[k] = nextVal
         markPending(k)
       }
       return { ratings: next }
     })
+    useUndoStore.getState().push(actions)
     scheduleFlush(get)
   },
 

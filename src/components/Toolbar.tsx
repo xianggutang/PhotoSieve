@@ -3,6 +3,7 @@ import { useSelectionStore } from "../stores/selectionStore"
 import { useRatingStore, COLOR_LABELS } from "../stores/ratingStore"
 import { useFilterStore } from "../stores/filterStore"
 import { useCompareStore } from "../stores/compareStore"
+import { useUndoStore } from "../stores/undoStore"
 
 interface ToolbarProps {
   viewMode: "grid" | "filmstrip"
@@ -43,6 +44,8 @@ export default function Toolbar({ viewMode, onViewModeChange, orderedKeys, onDel
           </ToolbarBtn>
         )}
 
+        <UndoBtn />
+        <RedoBtn />
         <StarFilterBtn open={openPanel === "stars"} onToggle={() => setOpenPanel(openPanel === "stars" ? null : "stars")} />
         <ColorFilterBtn open={openPanel === "colors"} onToggle={() => setOpenPanel(openPanel === "colors" ? null : "colors")} />
         <RejectedFilterBtn />
@@ -179,6 +182,40 @@ function ViewToggle({ active, onClick, label, children }: { active: boolean; onC
         {children}
       </svg>
     </button>
+  )
+}
+
+function UndoBtn() {
+  const canUndo = useUndoStore((s) => s.undoStack.length > 0)
+  const doUndo = () => {
+    const actions = useUndoStore.getState().undo()
+    if (!actions) return
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) ratings[a.key] = a.prev
+    useRatingStore.setState({ ratings })
+  }
+  return (
+    <ToolbarBtn label="撤销 (Ctrl+Z)" disabled={!canUndo} onClick={doUndo}>
+      <path d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0015.36 5.64" />
+    </ToolbarBtn>
+  )
+}
+
+function RedoBtn() {
+  const canRedo = useUndoStore((s) => s.redoStack.length > 0)
+  const doRedo = () => {
+    const actions = useUndoStore.getState().redo()
+    if (!actions) return
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) ratings[a.key] = a.next
+    useRatingStore.setState({ ratings })
+  }
+  return (
+    <ToolbarBtn label="重做 (Ctrl+Shift+Z)" disabled={!canRedo} onClick={doRedo}>
+      <path d="M20 4v5h-5M4 20v-5h5M20 9a9 9 0 01-15.36 5.64" />
+    </ToolbarBtn>
   )
 }
 

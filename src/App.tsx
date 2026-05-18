@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useSelectionStore } from "./stores/selectionStore"
 import { useRatingStore, type RatingInfo, type RatingRow } from "./stores/ratingStore"
+import { useUndoStore } from "./stores/undoStore"
 import { useFilterStore } from "./stores/filterStore"
 import { useActiveKeyStore } from "./stores/activeKeyStore"
 import { groupBurstPhotos, flattenBurstKeys } from "./utils/groupBurstPhotos"
@@ -39,6 +40,28 @@ export default function App() {
   )
   const selectedCount = useSelectionStore((s) => s.selectedKeys.size)
   const allKeys = useMemo(() => flattenBurstKeys(burstGroups), [burstGroups])
+
+  const applyUndo = useCallback(() => {
+    const actions = useUndoStore.getState().undo()
+    if (!actions) return
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) {
+      ratings[a.key] = a.prev
+    }
+    useRatingStore.setState({ ratings })
+  }, [])
+
+  const applyRedo = useCallback(() => {
+    const actions = useUndoStore.getState().redo()
+    if (!actions) return
+    const rs = useRatingStore.getState()
+    const ratings = { ...rs.ratings }
+    for (const a of actions) {
+      ratings[a.key] = a.next
+    }
+    useRatingStore.setState({ ratings })
+  }, [])
 
   async function doScan(targetPath: string) {
     setLoading(true)
@@ -164,6 +187,18 @@ export default function App() {
       }
 
       const ctrl = e.ctrlKey || e.metaKey
+
+      if (ctrl && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        applyUndo()
+        return
+      }
+      if (ctrl && e.key === "Z" && e.shiftKey || ctrl && e.key === "z" && e.shiftKey) {
+        e.preventDefault()
+        applyRedo()
+        return
+      }
+
       if (ctrl && e.key === "a") {
         e.preventDefault()
         useSelectionStore.getState().selectAll(allKeys)
