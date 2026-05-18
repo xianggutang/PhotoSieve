@@ -197,7 +197,8 @@ function UndoBtn() {
   }
   return (
     <ToolbarBtn label="撤销 (Ctrl+Z)" disabled={!canUndo} onClick={doUndo}>
-      <path d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0015.36 5.64" />
+      <path d="M1 4v6h6" />
+      <path d="M3.5 16A9 9 0 102 11" />
     </ToolbarBtn>
   )
 }
@@ -214,7 +215,8 @@ function RedoBtn() {
   }
   return (
     <ToolbarBtn label="重做 (Ctrl+Shift+Z)" disabled={!canRedo} onClick={doRedo}>
-      <path d="M20 4v5h-5M4 20v-5h5M20 9a9 9 0 01-15.36 5.64" />
+      <path d="M23 4v6h-6" />
+      <path d="M20.5 16A9 9 0 1122 11" />
     </ToolbarBtn>
   )
 }
